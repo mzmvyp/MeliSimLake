@@ -2,6 +2,8 @@
 
 Plataforma Lakehouse e Machine Learning integrada ao **Melisim** — simulação do ecossistema Mercado Livre em microsserviços. Consome dados via CDC (Debezium) e Kafka, processa em camadas Bronze/Silver/Gold com Delta Lake, e serve modelos de ML via FastAPI.
 
+**Repositórios:** este projeto ([MeliSimLake](https://github.com/mzmvyp/MeliSimLake)) + a fonte de dados ([MeliSim](https://github.com/mzmvyp/MeliSim)). Clone os dois lado a lado e use a rede Docker externa `melisim_melisim` conforme `docker-compose.override.yml`.
+
 ## Arquitetura em resumo
 
 ```
