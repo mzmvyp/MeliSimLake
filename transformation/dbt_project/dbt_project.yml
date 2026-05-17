@@ -1,0 +1,49 @@
+name: melisimlake
+version: "1.0.0"
+config-version: 2
+
+profile: melisimlake
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  melisimlake:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      core:
+        +materialized: table
+        +schema: gold
+        +file_format: delta
+        +location_root: "s3a://gold"
+      analytics:
+        +materialized: table
+        +schema: gold_analytics
+        +file_format: delta
+        +location_root: "s3a://gold"
+      ml_features:
+        +materialized: table
+        +schema: gold_ml
+        +file_format: delta
+        +location_root: "s3a://gold"
+
+seeds:
+  melisimlake:
+    +schema: seeds
+
+vars:
+  start_date: "2020-01-01"
+  end_date: "2030-12-31"

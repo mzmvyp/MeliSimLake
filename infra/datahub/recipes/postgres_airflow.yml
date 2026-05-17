@@ -1,0 +1,22 @@
+source:
+  type: postgres
+  config:
+    host_port: "postgres-airflow:5432"
+    database: airflow
+    username: "${POSTGRES_AIRFLOW_USER}"
+    password: "${POSTGRES_AIRFLOW_PASSWORD}"
+    schema_pattern:
+      allow:
+        - "public"
+    include_tables: true
+    include_views: true
+    profile_pattern:
+      deny:
+        - ".*"
+
+sink:
+  type: datahub-rest
+  config:
+    server: "http://datahub-gms:8080"
+
+pipeline_name: "melisimlake_postgres_airflow"

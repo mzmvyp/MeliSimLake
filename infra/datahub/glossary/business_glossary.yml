@@ -1,0 +1,102 @@
+version: "1"
+glossary:
+  nodes:
+    - name: "MeliSimLake"
+      description: "Plataforma Lakehouse simulando operações de e-commerce no estilo Mercado Livre"
+      children:
+        - name: "Camadas de Dados"
+          description: "Arquitetura Medallion: Bronze → Silver → Gold"
+          terms:
+            - name: "Bronze"
+              description: >
+                Camada de dados brutos. Armazena dados exatamente como recebidos das fontes
+                (CDC via Debezium, eventos Kafka, CSVs, APIs externas) em formato Parquet
+                particionado por data de ingestão. Imutável por design.
+              source_ref: "s3://bronze/"
+
+            - name: "Silver"
+              description: >
+                Camada de dados limpos e validados. Aplica SCD Type 2 para dimensões
+                (usuários, produtos), deduplicação, normalização de formatos e validação
+                de qualidade via Great Expectations. Formato Delta Lake com ACID.
+              source_ref: "s3://silver/"
+
+            - name: "Gold"
+              description: >
+                Camada analítica dimensional (Kimball). Contém fatos e dimensões prontos
+                para consumo por BI, dashboards e features de ML. Criada via dbt + Trino.
+              source_ref: "s3://gold/"
+
+        - name: "Métricas de Negócio"
+          description: "KPIs principais do e-commerce simulado"
+          terms:
+            - name: "GMV"
+              description: >
+                Gross Merchandise Value — valor total de todos os pedidos confirmados,
+                excluindo cancelamentos e reembolsos. Calculado como SUM(total_amount)
+                na fact_orders com status NOT IN ('cancelled', 'refunded').
+              source_ref: "gold.fact_orders"
+
+            - name: "AOV"
+              description: >
+                Average Order Value — ticket médio por pedido. Calculado como
+                GMV / número de pedidos. Indicador de saúde do mix de produtos.
+              source_ref: "gold.fact_orders"
+
+            - name: "Taxa de Conversão"
+              description: >
+                Percentual de sessões que resultaram em pelo menos uma compra.
+                Calculado como sessões com compra / total de sessões.
+              source_ref: "gold.fact_sessions"
+
+            - name: "LTV"
+              description: >
+                Lifetime Value — valor total que um cliente gerou desde o cadastro.
+                Calculado como SUM(monetary) acumulado no segmento RFM.
+              source_ref: "gold.customer_rfm"
+
+        - name: "Segmentação RFM"
+          description: "Framework de segmentação de clientes por Recência, Frequência e Valor Monetário"
+          terms:
+            - name: "Champions"
+              description: "Clientes com scores R=5, F=5, M=5. Compraram recentemente, frequentemente e gastam muito."
+            - name: "Loyal"
+              description: "Clientes com R≥3, F≥4. Compradores frequentes com boa recência."
+            - name: "At Risk"
+              description: "Clientes com R≤2, F≥3. Eram bons clientes mas não compram há tempo."
+            - name: "Lost"
+              description: "Clientes com R=1, F=1. Não voltaram depois da primeira compra."
+
+        - name: "Modelos de ML"
+          description: "Modelos de machine learning treinados na plataforma"
+          terms:
+            - name: "ALS Recommender"
+              description: >
+                Collaborative Filtering com Alternating Least Squares (Implicit 0.7).
+                Recomenda produtos baseado em histórico de interações implícitas.
+                Métricas: Recall@20, NDCG@20, MRR@20.
+
+            - name: "GRU4Rec"
+              description: >
+                Modelo sequencial de sessão baseado em GRU (PyTorch). Prediz o próximo
+                produto de interesse baseado nos itens vistos na sessão atual.
+
+            - name: "SASRec"
+              description: >
+                Self-Attentive Sequential Recommendation com Transformer. Alternativa
+                ao GRU4Rec com atenção causal para capturar dependências de longo prazo.
+
+            - name: "Churn XGBoost"
+              description: >
+                Classificador de churn com XGBoost + Optuna (50 trials) + CalibratedClassifierCV.
+                Features do Feast. Interpretabilidade via SHAP TreeExplainer.
+
+            - name: "Fraud XGBoost"
+              description: >
+                Detecção de fraude em duas etapas: Isolation Forest (anomalia) +
+                XGBoost Classifier (score final). scale_pos_weight=19 para classes desbalanceadas.
+
+            - name: "Demand LSTM"
+              description: >
+                Previsão de demanda por categoria com LSTM multi-step. Walk-forward
+                validation (5 folds). Métrica principal: WAPE (Weighted Absolute Percentage Error).

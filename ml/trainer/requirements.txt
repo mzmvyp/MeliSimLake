@@ -1,0 +1,11 @@
+mlflow==2.16.0
+trino==0.331.0
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.2
+xgboost==2.1.1
+implicit==0.7.2
+scipy==1.13.1
+torch==2.4.1
+loguru==0.7.2
+boto3==1.35.36

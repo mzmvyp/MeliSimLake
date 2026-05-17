@@ -1,0 +1,23 @@
+source:
+  type: s3
+  config:
+    aws_config:
+      aws_access_key_id: "${MINIO_ROOT_USER}"
+      aws_secret_access_key: "${MINIO_ROOT_PASSWORD}"
+      aws_endpoint_url: "http://minio:9000"
+      aws_region: "us-east-1"
+    path_specs:
+      - include: "s3://bronze/**/*.parquet"
+        table_name: "{table[0]}"
+      - include: "s3://silver/**/*.parquet"
+        table_name: "{table[0]}"
+      - include: "s3://gold/**/*.parquet"
+        table_name: "{table[0]}"
+    max_rows: 0
+
+sink:
+  type: datahub-rest
+  config:
+    server: "http://datahub-gms:8080"
+
+pipeline_name: "melisimlake_minio_s3"

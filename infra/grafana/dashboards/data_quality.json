@@ -1,0 +1,168 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "Qualidade de dados — Great Expectations validation results por camada",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "GE Validation Pass Rate — Bronze",
+      "type": "gauge",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_ge_validation_success_rate{layer=\"bronze\"} * 100",
+          "legendFormat": "Bronze Pass Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 90},
+            {"color": "green", "value": 99}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "GE Validation Pass Rate — Silver",
+      "type": "gauge",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_ge_validation_success_rate{layer=\"silver\"} * 100",
+          "legendFormat": "Silver Pass Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 95},
+            {"color": "green", "value": 99}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "GE Validation Pass Rate — Gold",
+      "type": "gauge",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_ge_validation_success_rate{layer=\"gold\"} * 100",
+          "legendFormat": "Gold Pass Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 98},
+            {"color": "green", "value": 99.5}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Failed Expectations — Last 7 Days",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "increase(melisimlake_ge_failed_expectations_total[7d])",
+          "legendFormat": "Failed",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 10}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Validation Results Timeline",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_ge_validation_success_rate * 100",
+          "legendFormat": "{{layer}} — {{suite}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "id": 6,
+      "title": "Null Rate by Column — Silver Users",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_ge_null_rate{suite=\"silver_users\"}",
+          "legendFormat": "{{column}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.01},
+            {"color": "red", "value": 0.05}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Schema Drift Events",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "increase(melisimlake_schema_drift_total[1h])",
+          "legendFormat": "{{source}} schema drift",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "tags": ["data-quality", "great-expectations"],
+  "time": {"from": "now-24h", "to": "now"},
+  "title": "MeliSimLake — Data Quality",
+  "uid": "melisimlake-dq",
+  "version": 1
+}

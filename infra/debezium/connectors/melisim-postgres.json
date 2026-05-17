@@ -1,0 +1,27 @@
+{
+  "name": "melisim-postgres",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "$MELISIM_POSTGRES_HOST",
+    "database.port": "$MELISIM_POSTGRES_PORT",
+    "database.user": "$MELISIM_POSTGRES_USER",
+    "database.password": "$MELISIM_POSTGRES_PASSWORD",
+    "database.dbname": "$MELISIM_POSTGRES_DB",
+    "topic.prefix": "cdc.melisim",
+    "plugin.name": "pgoutput",
+    "publication.autocreate.mode": "filtered",
+    "slot.name": "melisimlake_dbz_slot",
+    "publication.name": "melisimlake_dbz_pub",
+    "heartbeat.interval.ms": "30000",
+    "table.include.list": "$MELISIM_POSTGRES_TABLES",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "decimal.handling.mode": "double",
+    "time.precision.mode": "connect",
+    "tombstones.on.delete": "true",
+    "snapshot.mode": "initial"
+  }
+}

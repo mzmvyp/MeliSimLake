@@ -1,0 +1,809 @@
+---
+# =============================================================================
+# MeliSimLake — Docker Compose
+# Versões pinadas. Rede compartilhada com Melisim via external network.
+# =============================================================================
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.0-python3.11
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow123@postgres-airflow:5432/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow123@postgres-airflow:5432/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://redis-airflow:6379/0
+    AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW__CORE__FERNET_KEY:-46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLt0nIe3aI=}"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__WEBSERVER__SECRET_KEY: "${AIRFLOW__WEBSERVER__SECRET_KEY:-melisimlake-secret-key}"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: America/Sao_Paulo
+    AIRFLOW_UID: "${AIRFLOW_UID:-50000}"
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MINIO_ENDPOINT: http://minio:9000
+    AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+    AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+    MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    DATAHUB_GMS_URL: http://datahub-gms:8080
+    SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
+    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-apache-spark==4.9.0
+  volumes:
+    - ./orchestration/dags:/opt/airflow/dags
+    - ./orchestration/plugins:/opt/airflow/plugins
+    - ./orchestration/logs:/opt/airflow/logs
+    - ./infra/airflow/config/airflow.cfg:/opt/airflow/airflow.cfg
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+    redis-airflow:
+      condition: service_healthy
+    airflow-init:
+      condition: service_completed_successfully
+  networks:
+    - melisimlake-net
+
+x-spark-common: &spark-common
+  image: bitnamilegacy/spark:3.5.1
+  environment: &spark-common-env
+    SPARK_MODE: worker
+    SPARK_MASTER_URL: spark://spark-master:7077
+    SPARK_WORKER_MEMORY: 4G
+    SPARK_WORKER_CORES: "4"
+    AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+    AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+  networks:
+    - melisimlake-net
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Bancos de dados de metadados
+  # ---------------------------------------------------------------------------
+
+  postgres-airflow:
+    image: postgres:16.3
+    container_name: melisimlake-postgres-airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow123
+      POSTGRES_DB: airflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  postgres-mlflow:
+    image: postgres:16.3
+    container_name: melisimlake-postgres-mlflow
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow123
+      POSTGRES_DB: mlflow
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-mlflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "mlflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  postgres-feast:
+    image: postgres:16.3
+    container_name: melisimlake-postgres-feast
+    environment:
+      POSTGRES_USER: feast
+      POSTGRES_PASSWORD: feast123
+      POSTGRES_DB: feast
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-feast-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "feast"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  redis-airflow:
+    image: redis:7.2-alpine
+    container_name: melisimlake-redis-airflow
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO (S3 local)
+  # ---------------------------------------------------------------------------
+
+  minio:
+    image: minio/minio:RELEASE.2024-07-04T14-25-45Z
+    container_name: melisimlake-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-07-03T20-17-25Z
+    container_name: melisimlake-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: /init/buckets-init.sh
+    volumes:
+      - ./infra/minio:/init
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+    networks:
+      - melisimlake-net
+
+  # ---------------------------------------------------------------------------
+  # Kafka stack
+  # ---------------------------------------------------------------------------
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: melisimlake-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=srvr,ruok,stat"
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo srvr | nc localhost 2181 | grep Zookeeper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: melisimlake-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      # Advertise the container hostname so clients on multiple Docker networks (e.g. Debezium
+      # also attached to melisim_melisim) never follow broker metadata to ambiguous "kafka".
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://melisimlake-kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: melisimlake-schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: melisimlake-kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: melisimlake-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command: /init/topics-init.sh
+    volumes:
+      - ./infra/kafka:/init
+    networks:
+      - melisimlake-net
+
+  # ---------------------------------------------------------------------------
+  # Debezium Connect (CDC)
+  # ---------------------------------------------------------------------------
+
+  debezium-connect:
+    image: debezium/connect:2.6
+    container_name: melisimlake-debezium
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      # Nome explícito do container: se o Debezium entrar na rede do Melisim, o hostname
+      # curto "kafka" pode resolver para o broker errado (dois clusters Kafka).
+      BOOTSTRAP_SERVERS: melisimlake-kafka:9092
+      GROUP_ID: melisimlake-debezium
+      CONFIG_STORAGE_TOPIC: debezium.configs
+      OFFSET_STORAGE_TOPIC: debezium.offsets
+      STATUS_STORAGE_TOPIC: debezium.status
+      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Airflow
+  # ---------------------------------------------------------------------------
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: melisimlake-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: melisimlake-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: melisimlake-airflow-worker
+    command: celery worker
+    environment:
+      <<: *airflow-common-env
+      DUMB_INIT_SETSID: "0"
+    healthcheck:
+      test: ["CMD-SHELL", 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" -t 10']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: melisimlake-airflow-init
+    # Override anchor depends_on (init must not depend on itself)
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@melisimlake.local \
+          --password admin123 || true
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Spark
+  # ---------------------------------------------------------------------------
+
+  spark-master:
+    image: bitnamilegacy/spark:3.5.1
+    container_name: melisimlake-spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+    ports:
+      - "8082:8080"
+      - "7077:7077"
+    volumes:
+      - ./transformation/spark_jobs:/opt/spark-jobs
+      - ./ingestion:/opt/ingestion
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  spark-worker-1:
+    <<: *spark-common
+    container_name: melisimlake-spark-worker-1
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      <<: *spark-common-env
+      SPARK_MODE: worker
+    restart: unless-stopped
+
+  spark-worker-2:
+    <<: *spark-common
+    container_name: melisimlake-spark-worker-2
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      <<: *spark-common-env
+      SPARK_MODE: worker
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Trino
+  # ---------------------------------------------------------------------------
+
+  trino:
+    image: trinodb/trino:446
+    container_name: melisimlake-trino
+    ports:
+      - "8084:8080"
+    volumes:
+      - ./infra/trino/etc:/etc/trino
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MLflow
+  # ---------------------------------------------------------------------------
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.0
+    container_name: melisimlake-mlflow
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        pip install --no-cache-dir psycopg2-binary boto3 && \
+        mlflow server \
+          --backend-store-uri postgresql://mlflow:mlflow123@postgres-mlflow:5432/mlflow \
+          --default-artifact-root s3://mlflow-artifacts/ \
+          --host 0.0.0.0 \
+          --port 5000
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres-mlflow:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Prometheus + Grafana
+  # ---------------------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: melisimlake-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: melisimlake-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-grafana123}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # DataHub
+  # ---------------------------------------------------------------------------
+
+  elasticsearch-datahub:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: melisimlake-elasticsearch-datahub
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - elasticsearch-datahub-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -qE 'yellow|green'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+    profiles:
+      - governance
+
+  datahub-postgres-setup:
+    image: postgres:16.3
+    container_name: melisimlake-datahub-postgres-setup
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: airflow123
+    volumes:
+      - ./infra/datahub/postgres-init.sql:/init/postgres-init.sql:ro
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -e
+        echo "[datahub-postgres-setup] applying schema to postgres-airflow/airflow"
+        psql -h postgres-airflow -U airflow -d airflow -v ON_ERROR_STOP=1 -f /init/postgres-init.sql
+        echo "[datahub-postgres-setup] schema applied"
+    networks:
+      - melisimlake-net
+    restart: "no"
+    profiles:
+      - governance
+
+  datahub-upgrade:
+    image: acryldata/datahub-upgrade:v0.14.0
+    container_name: melisimlake-datahub-upgrade
+    command: ["-u", "SystemUpdate"]
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      elasticsearch-datahub:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      datahub-postgres-setup:
+        condition: service_completed_successfully
+    environment:
+      DATAHUB_GMS_HOST: datahub-gms
+      DATAHUB_GMS_PORT: "8080"
+      EBEAN_DATASOURCE_USERNAME: airflow
+      EBEAN_DATASOURCE_PASSWORD: airflow123
+      EBEAN_DATASOURCE_HOST: postgres-airflow:5432
+      EBEAN_DATASOURCE_URL: "jdbc:postgresql://postgres-airflow:5432/airflow"
+      EBEAN_DATASOURCE_DRIVER: org.postgresql.Driver
+      ENTITY_SERVICE_IMPL: ebean
+      KAFKA_BOOTSTRAP_SERVER: melisimlake-kafka:9092
+      KAFKA_SCHEMAREGISTRY_URL: http://schema-registry:8081
+      ELASTICSEARCH_HOST: elasticsearch-datahub
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_INDEX_BUILDER_SETTINGS_REINDEX: "true"
+      ELASTICSEARCH_INDEX_BUILDER_MAPPINGS_REINDEX: "true"
+      GRAPH_SERVICE_IMPL: elasticsearch
+      ENTITY_REGISTRY_CONFIG_PATH: /datahub/datahub-gms/resources/entity-registry.yml
+      BACKFILL_BROWSE_PATHS_V2: "false"
+      REPROCESS_DEFAULT_BROWSE_PATHS_V2: "false"
+      REINDEX_DATA_JOB_INPUT_OUTPUT: "false"
+      BACKFILL_POLICY_FIELDS: "false"
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    networks:
+      - melisimlake-net
+    restart: "no"
+    profiles:
+      - governance
+
+  datahub-gms:
+    image: acryldata/datahub-gms:v0.14.0
+    container_name: melisimlake-datahub-gms
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      elasticsearch-datahub:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      datahub-postgres-setup:
+        condition: service_completed_successfully
+    environment:
+      DATAHUB_SERVER_TYPE: quickstart
+      EBEAN_DATASOURCE_USERNAME: airflow
+      EBEAN_DATASOURCE_PASSWORD: airflow123
+      EBEAN_DATASOURCE_HOST: postgres-airflow:5432
+      EBEAN_DATASOURCE_URL: "jdbc:postgresql://postgres-airflow:5432/airflow"
+      EBEAN_DATASOURCE_DRIVER: io.ebean.datasource.pool.ConnectionPool
+      KAFKA_BOOTSTRAP_SERVER: melisimlake-kafka:9092
+      KAFKA_SCHEMAREGISTRY_URL: http://schema-registry:8081
+      ELASTICSEARCH_HOST: elasticsearch-datahub
+      ELASTICSEARCH_PORT: "9200"
+      ES_BULK_REFRESH_POLICY: WAIT_UNTIL
+      ELASTICSEARCH_INDEX_BUILDER_SETTINGS_REINDEX: "true"
+      ELASTICSEARCH_INDEX_BUILDER_MAPPINGS_REINDEX: "true"
+      GRAPH_SERVICE_IMPL: elasticsearch
+      ENTITY_REGISTRY_CONFIG_PATH: /datahub/datahub-gms/resources/entity-registry.yml
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "8085:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+    profiles:
+      - governance
+
+  datahub-frontend:
+    image: acryldata/datahub-frontend-react:v0.14.0
+    container_name: melisimlake-datahub-frontend
+    depends_on:
+      datahub-gms:
+        condition: service_healthy
+    environment:
+      DATAHUB_GMS_HOST: datahub-gms
+      DATAHUB_GMS_PORT: 8080
+      DATAHUB_SECRET: "${DATAHUB_SECRET:-melisimlake-datahub-secret}"
+      KAFKA_BOOTSTRAP_SERVER: "melisimlake-kafka:9092"
+      DATAHUB_APP_VERSION: "1.0"
+      DATAHUB_PLAY_MEM_MAX: 64M
+      JAVA_OPTS: "-Xms256m -Xmx512m -Dhttp.port=9002 -Dconfig.file=datahub-frontend/conf/application.conf"
+    ports:
+      - "9002:9002"
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+    profiles:
+      - governance
+
+  # ---------------------------------------------------------------------------
+  # Jupyter (exploração)
+  # ---------------------------------------------------------------------------
+
+  jupyter:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    container_name: melisimlake-jupyter
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # ---------------------------------------------------------------------------
+  # Serviços locais (build)
+  # ---------------------------------------------------------------------------
+
+  ml-api:
+    build:
+      context: ./serving/ml_api
+      dockerfile: Dockerfile
+    container_name: melisimlake-ml-api
+    environment:
+      MELISIMLAKE_MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin123}"
+      MELISIMLAKE_MINIO_ENDPOINT: http://minio:9000
+      MELISIMLAKE_KAFKA_BOOTSTRAP_SERVERS: melisimlake-kafka:9092
+      POSTGRES_FEAST_HOST: postgres-feast
+      POSTGRES_FEAST_USER: feast
+      POSTGRES_FEAST_PASSWORD: feast123
+      POSTGRES_FEAST_DB: feast
+      MELISIMLAKE_TRINO_HOST: trino
+      MELISIMLAKE_TRINO_PORT: "8080"
+      TRINO_HOST: trino
+      TRINO_PORT: "8080"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+    profiles:
+      - serving
+
+  dashboard:
+    build:
+      context: ./serving/dashboard
+      dockerfile: Dockerfile
+    container_name: melisimlake-dashboard
+    environment:
+      TRINO_HOST: trino
+      TRINO_PORT: 8080
+      TRINO_CATALOG: delta
+      TRINO_SCHEMA: gold
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      ML_API_URL: http://ml-api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      trino:
+        condition: service_healthy
+      ml-api:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+    profiles:
+      - serving
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  postgres-airflow-data:
+  postgres-mlflow-data:
+  postgres-feast-data:
+  minio-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+  prometheus-data:
+  grafana-data:
+  elasticsearch-datahub-data:
+
+# =============================================================================
+# Redes
+# =============================================================================
+
+networks:
+  melisimlake-net:
+    name: melisimlake-net
+    driver: bridge

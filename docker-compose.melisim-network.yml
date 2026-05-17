@@ -1,0 +1,23 @@
+# =============================================================================
+# Opcional: anexa o Debezium à rede Docker do Melisim para resolver
+# melisim-postgres por nome de host, mantendo também melisimlake-net (Kafka interno).
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.melisim-network.yml up -d debezium-connect
+#   make up-debezium-melisim-net
+#
+# A rede externa deve existir (stack Melisim no ar). Nome padrão do projeto Melisim:
+#   melisim_melisim
+# Se o nome for outro: ajuste abaixo ou crie rede com o nome esperado.
+# =============================================================================
+
+services:
+  debezium-connect:
+    networks:
+      melisimlake-net:
+      melisim-app:
+
+networks:
+  melisim-app:
+    external: true
+    name: melisim_melisim

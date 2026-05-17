@@ -1,0 +1,21 @@
+melisimlake:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: none
+      host: "{{ env_var('TRINO_HOST', 'localhost') }}"
+      port: "{{ env_var('TRINO_PORT', '8084') | int }}"
+      database: delta
+      schema: silver
+      user: "{{ env_var('TRINO_USER', 'admin') }}"
+      threads: 4
+    prod:
+      type: trino
+      method: none
+      host: trino
+      port: 8080
+      database: delta
+      schema: silver
+      user: admin
+      threads: 8

@@ -1,0 +1,18 @@
+project: melisimlake
+registry: postgresql://feast:feast@postgres-feast:5435/feast
+provider: local
+online_store:
+  type: postgres
+  host: postgres-feast
+  port: 5435
+  database: feast
+  user: feast
+  password: feast
+offline_store:
+  type: trino
+  host: trino
+  port: 8080
+  catalog: delta
+  connector:
+    type: hive
+entity_key_serialization_version: 2

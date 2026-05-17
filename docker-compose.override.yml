@@ -1,0 +1,165 @@
+---
+# =============================================================================
+# docker-compose.override.yml — overrides locais de desenvolvimento
+# Este arquivo NÃO deve ser commitado com credenciais reais.
+# =============================================================================
+
+services:
+
+  # Airflow com hot-reload de DAGs em desenvolvimento
+  airflow-scheduler:
+    volumes:
+      - ./orchestration/dags:/opt/airflow/dags
+      - ./orchestration/plugins:/opt/airflow/plugins
+      - ./orchestration/logs:/opt/airflow/logs
+      - ./ml:/opt/ml
+      - ./ingestion:/opt/ingestion
+      - ./transformation:/opt/transformation
+
+  airflow-worker:
+    volumes:
+      - ./orchestration/dags:/opt/airflow/dags
+      - ./orchestration/plugins:/opt/airflow/plugins
+      - ./orchestration/logs:/opt/airflow/logs
+      - ./ml:/opt/ml
+      - ./ingestion:/opt/ingestion
+      - ./transformation:/opt/transformation
+
+  # Spark master com acesso aos jobs locais
+  spark-master:
+    volumes:
+      - ./transformation/spark_jobs:/opt/spark-jobs
+      - ./ingestion:/opt/ingestion
+      - spark-ivy-cache:/root/.ivy2
+
+  spark-worker-1:
+    volumes:
+      - ./transformation/spark_jobs:/opt/spark-jobs
+      - ./ingestion:/opt/ingestion
+      - spark-ivy-cache:/root/.ivy2
+
+  spark-worker-2:
+    volumes:
+      - ./transformation/spark_jobs:/opt/spark-jobs
+      - ./ingestion:/opt/ingestion
+      - spark-ivy-cache:/root/.ivy2
+
+  # Debezium fica nas duas redes para alcancar Postgres + MySQL do Melisim.
+  debezium-connect:
+    networks:
+      - melisimlake-net
+      - melisim-net
+
+  # Spark Structured Streaming consumer: Kafka (Debezium CDC) -> Bronze (MinIO).
+  cdc-consumer:
+    build:
+      context: .
+      dockerfile: ingestion/cdc_consumer/Dockerfile
+    image: melisimlake/cdc-consumer:local
+    container_name: melisimlake-cdc-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      debezium-connect:
+        condition: service_healthy
+    environment:
+      MELISIMLAKE_KAFKA_BOOTSTRAP_SERVERS: melisimlake-kafka:9092
+      MELISIMLAKE_MINIO_ENDPOINT: http://minio:9000
+      MELISIMLAKE_MINIO_ACCESS_KEY: minioadmin
+      MELISIMLAKE_MINIO_SECRET_KEY: minioadmin123
+      MELISIMLAKE_BRONZE_BUCKET: bronze
+      MELISIMLAKE_CHECKPOINT_BUCKET: checkpoints
+      MELISIMLAKE_STREAMING_TRIGGER_SECONDS: "30"
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # Spark Structured Streaming consumer: Kafka do Melisim (eventos de dominio) -> Bronze.
+  events-consumer:
+    build:
+      context: .
+      dockerfile: ingestion/events_consumer/Dockerfile
+    image: melisimlake/events-consumer:local
+    container_name: melisimlake-events-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      MELISIM_KAFKA_BOOTSTRAP_SERVERS: melisim-kafka:9092
+      MELISIMLAKE_MINIO_ENDPOINT: http://minio:9000
+      MELISIMLAKE_MINIO_ACCESS_KEY: minioadmin
+      MELISIMLAKE_MINIO_SECRET_KEY: minioadmin123
+      MELISIMLAKE_BRONZE_BUCKET: bronze
+      MELISIMLAKE_CHECKPOINT_BUCKET: checkpoints
+    networks:
+      - melisimlake-net
+      - melisim-net
+    restart: unless-stopped
+
+  # ML trainer: roda 4 modelos (churn, payment failure, demand forecast LSTM, ALS) em loop.
+  ml-trainer:
+    build:
+      context: ./ml/trainer
+    image: melisimlake/ml-trainer:local
+    container_name: melisimlake-ml-trainer
+    depends_on:
+      mlflow:
+        condition: service_started
+      trino:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin123
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      TRINO_HOST: trino
+      TRINO_PORT: "8080"
+      TRINO_USER: ml-trainer
+      TRINO_CATALOG: delta
+      TRINO_SCHEMA: gold_ml
+      TRAINER_SLEEP_SECONDS: "300"
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+  # Pipeline batch bronze -> gold (Delta) executado em loop.
+  batch-runner:
+    build:
+      context: .
+      dockerfile: transformation/spark_jobs/Dockerfile
+    image: melisimlake/batch-runner:local
+    container_name: melisimlake-batch-runner
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      MELISIMLAKE_MINIO_ENDPOINT: http://minio:9000
+      MELISIMLAKE_MINIO_ACCESS_KEY: minioadmin
+      MELISIMLAKE_MINIO_SECRET_KEY: minioadmin123
+      BATCH_INTERVAL_SECONDS: "60"
+      SPARK_DRIVER_HOST: melisimlake-batch-runner
+    networks:
+      - melisimlake-net
+    restart: unless-stopped
+
+networks:
+  melisim-net:
+    external: true
+    name: melisim_melisim
+
+volumes:
+  spark-ivy-cache:

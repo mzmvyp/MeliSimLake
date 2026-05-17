@@ -1,0 +1,213 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "Métricas de ML — inference latency, model drift, request rates por modelo",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "API Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "rate(melisimlake_api_requests_total[1m])",
+          "legendFormat": "{{endpoint}} {{method}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "API P99 Latency (ms)",
+      "type": "timeseries",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(melisimlake_api_latency_seconds_bucket[5m])) * 1000",
+          "legendFormat": "p99 {{endpoint}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(melisimlake_api_latency_seconds_bucket[5m])) * 1000",
+          "legendFormat": "p95 {{endpoint}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}}
+    },
+    {
+      "id": 3,
+      "title": "API Error Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "rate(melisimlake_api_errors_total[5m])",
+          "legendFormat": "errors {{endpoint}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Recommend User — Recall@20",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 4, "x": 8, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_model_recall_at_20{model=\"als_recommender\"}",
+          "legendFormat": "ALS Recall@20",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 0.10},
+            {"color": "green", "value": 0.15}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "GRU4Rec — Recall@20",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 4, "x": 12, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_model_recall_at_20{model=\"gru4rec\"}",
+          "legendFormat": "GRU4Rec Recall@20",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 0.15},
+            {"color": "green", "value": 0.20}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Churn Model — AUC",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 4, "x": 16, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_model_auc{model=\"churn_xgboost\"}",
+          "legendFormat": "Churn AUC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "yellow", "value": 0.80},
+            {"color": "green", "value": 0.85}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Fraud Model — AUC",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 4, "x": 20, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_model_auc{model=\"fraud_xgboost\"}",
+          "legendFormat": "Fraud AUC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Model Inference Latency (P95, ms)",
+      "type": "bargauge",
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(melisimlake_api_latency_seconds_bucket[5m])) * 1000",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 200},
+            {"color": "red", "value": 500}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Demand Forecast — WAPE",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_model_wape{model=\"demand_lstm\"}",
+          "legendFormat": "LSTM WAPE",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.20},
+            {"color": "red", "value": 0.30}
+          ]}
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Training Job Duration",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 18, "x": 6, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "melisimlake_training_duration_seconds",
+          "legendFormat": "{{model}} training",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "tags": ["ml", "inference", "models"],
+  "time": {"from": "now-6h", "to": "now"},
+  "title": "MeliSimLake — ML Metrics",
+  "uid": "melisimlake-ml",
+  "version": 1
+}

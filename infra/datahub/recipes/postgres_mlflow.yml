@@ -1,0 +1,22 @@
+source:
+  type: postgres
+  config:
+    host_port: "postgres-mlflow:5432"
+    database: mlflow
+    username: "${POSTGRES_MLFLOW_USER}"
+    password: "${POSTGRES_MLFLOW_PASSWORD}"
+    schema_pattern:
+      allow:
+        - "public"
+    include_tables: true
+    include_views: true
+    profile_pattern:
+      deny:
+        - ".*"
+
+sink:
+  type: datahub-rest
+  config:
+    server: "http://datahub-gms:8080"
+
+pipeline_name: "melisimlake_postgres_mlflow"

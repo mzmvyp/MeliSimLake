@@ -1,0 +1,16 @@
+source:
+  type: mlflow
+  config:
+    tracking_uri: "http://mlflow:5000"
+    registry_uri: "http://mlflow:5000"
+    model_name_pattern:
+      allow:
+        - ".*"
+    store_last_n_runs: 10
+
+sink:
+  type: datahub-rest
+  config:
+    server: "http://datahub-gms:8080"
+
+pipeline_name: "melisimlake_mlflow"

@@ -1,0 +1,82 @@
+version: 2
+
+models:
+  - name: dim_users
+    description: "Dimensão usuários com surrogate key e atributos correntes"
+    columns:
+      - name: user_sk
+        tests: [not_null, unique]
+      - name: user_id
+        tests: [not_null, unique]
+      - name: email
+        tests: [not_null]
+      - name: gender
+        tests:
+          - accepted_values:
+              values: ['Feminino', 'Masculino', 'Não-binário', 'Não informado']
+
+  - name: dim_products
+    description: "Dimensão produtos com surrogate key"
+    columns:
+      - name: product_sk
+        tests: [not_null, unique]
+      - name: product_id
+        tests: [not_null, unique]
+      - name: price
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+
+  - name: dim_date
+    description: "Dimensão calendário 2020-2030 com flags BR"
+    columns:
+      - name: date_sk
+        tests: [not_null, unique]
+      - name: full_date
+        tests: [not_null, unique]
+      - name: is_weekend
+        tests: [not_null]
+      - name: is_black_friday
+        tests: [not_null]
+
+  - name: fact_orders
+    description: "Fato pedidos — grain: 1 linha por pedido"
+    columns:
+      - name: order_sk
+        tests: [not_null, unique]
+      - name: order_id
+        tests: [not_null, unique]
+      - name: user_id
+        tests: [not_null]
+      - name: total_amount
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['pending', 'processing', 'completed', 'cancelled', 'refunded']
+
+  - name: fact_events
+    description: "Fato eventos comportamentais — grain: 1 linha por evento"
+    columns:
+      - name: event_id
+        tests: [not_null, unique]
+      - name: event_type
+        tests:
+          - accepted_values:
+              values: ['clicks', 'cart', 'search', 'purchase', 'sessions', 'reviews']
+      - name: event_ts
+        tests: [not_null]
+
+  - name: fact_sessions
+    description: "Fato sessões sessionizadas — grain: 1 linha por sessão"
+    columns:
+      - name: session_sk
+        tests: [not_null, unique]
+      - name: session_id
+        tests: [not_null, unique]
+      - name: user_id
+        tests: [not_null]

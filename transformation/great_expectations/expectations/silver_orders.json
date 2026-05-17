@@ -1,0 +1,22 @@
+{
+  "expectation_suite_name": "silver_orders",
+  "expectations": [
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "order_id"}},
+    {"expectation_type": "expect_column_values_to_be_unique", "kwargs": {"column": "order_id"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "user_id"}},
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "status"}},
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "status",
+        "value_set": ["pending", "processing", "completed", "cancelled", "refunded"]
+      }
+    },
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "total_amount"}},
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {"column": "total_amount", "min_value": 0, "strict_min": true}
+    },
+    {"expectation_type": "expect_column_values_to_not_be_null", "kwargs": {"column": "created_at"}}
+  ]
+}
